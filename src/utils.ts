@@ -19,10 +19,33 @@ export interface SpotifyConfig {
   expiresAt?: number; // Unix timestamp in milliseconds
 }
 
-export function loadSpotifyConfig(): SpotifyConfig {
+let runtimeConfigOverride: SpotifyConfig | null = null;
+
+function loadSpotifyConfigFromEnv(): SpotifyConfig | null {
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
+
+  if (!(clientId && clientSecret && redirectUri)) {
+    return null;
+  }
+
+  const expiresAt = process.env.SPOTIFY_EXPIRES_AT;
+
+  return {
+    clientId,
+    clientSecret,
+    redirectUri,
+    accessToken: process.env.SPOTIFY_ACCESS_TOKEN,
+    refreshToken: process.env.SPOTIFY_REFRESH_TOKEN,
+    expiresAt: expiresAt ? Number(expiresAt) : undefined,
+  };
+}
+
+function loadSpotifyConfigFromFile(): SpotifyConfig {
   if (!fs.existsSync(CONFIG_FILE)) {
     throw new Error(
-      `Spotify configuration file not found at ${CONFIG_FILE}. Please create one with clientId, clientSecret, and redirectUri.`,
+      `Spotify configuration file not found at ${CONFIG_FILE}. Please create one with clientId, clientSecret, and redirectUri, or set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, and SPOTIFY_REDIRECT_URI environment variables.`,
     );
   }
 
@@ -43,7 +66,25 @@ export function loadSpotifyConfig(): SpotifyConfig {
   }
 }
 
+export function loadSpotifyConfig(): SpotifyConfig {
+  if (runtimeConfigOverride) {
+    return runtimeConfigOverride;
+  }
+
+  const fromEnv = loadSpotifyConfigFromEnv();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  return loadSpotifyConfigFromFile();
+}
+
 export function saveSpotifyConfig(config: SpotifyConfig): void {
+  if (process.env.VERCEL) {
+    runtimeConfigOverride = config;
+    return;
+  }
+
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
 }
 
