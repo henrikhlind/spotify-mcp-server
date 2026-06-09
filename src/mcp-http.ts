@@ -1,9 +1,7 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createSpotifyMcpServer, startTokenRefresh } from './mcp-server.js';
 
-const transports: Record<string, WebStandardStreamableHTTPServerTransport> = {};
 let tokenRefreshStarted = false;
 
 function tokensMatch(expected: string, provided: string): boolean {
@@ -58,44 +56,24 @@ function jsonError(status: number, message: string): Response {
     );
 }
 
+async function handleStatelessRequest(request: Request, parsedBody?: unknown): Promise<Response> {
+    const transport = new WebStandardStreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+    });
+
+    const server = createSpotifyMcpServer();
+    await server.connect(transport);
+    return transport.handleRequest(request, parsedBody !== undefined ? { parsedBody } : undefined);
+}
+
 async function handlePost(request: Request): Promise<Response> {
     const body = await request.json();
-    const sessionId = request.headers.get('mcp-session-id');
-    let transport: WebStandardStreamableHTTPServerTransport | undefined;
-
-    if (sessionId && transports[sessionId]) {
-        transport = transports[sessionId];
-    } else if (!sessionId && isInitializeRequest(body)) {
-        transport = new WebStandardStreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-            enableJsonResponse: true,
-            onsessioninitialized: (id) => {
-                if (transport) {
-                    transports[id] = transport;
-                }
-            },
-            onsessionclosed: (id) => {
-                delete transports[id];
-            },
-        });
-
-        const server = createSpotifyMcpServer();
-        await server.connect(transport);
-        return transport.handleRequest(request, { parsedBody: body });
-    } else {
-        return jsonError(400, 'Bad Request: No valid session ID provided');
-    }
-
-    return transport.handleRequest(request, { parsedBody: body });
+    return handleStatelessRequest(request, body);
 }
 
 async function handleSessionRequest(request: Request): Promise<Response> {
-    const sessionId = request.headers.get('mcp-session-id');
-    if (!(sessionId && transports[sessionId])) {
-        return jsonError(400, 'Invalid or missing session ID');
-    }
-
-    return transports[sessionId].handleRequest(request);
+    return handleStatelessRequest(request);
 }
 
 async function withAuth(request: Request, handler: (request: Request) => Promise<Response>): Promise<Response> {
